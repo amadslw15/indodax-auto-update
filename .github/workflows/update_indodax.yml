@@ -1,180 +1,77 @@
 name: Indodax 24/7 Auto-Update to Google Sheets
 
 on:
-  # Jalankan setiap 5 menit (24/7)
+  # Jalankan setiap 5 menit
   schedule:
     - cron: '*/5 * * * *'
-  # Bisa juga dijalankan manual
+  # Bisa dijalankan manual
   workflow_dispatch:
-  # Jalankan saat ada push kode baru
+  # Jalankan saat push kode
   push:
     branches: [ main ]
 
 jobs:
   update-indodax:
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # Maksimal jalan 10 menit
+    timeout-minutes: 5
     
     steps:
-    - name: Checkout repository
+    - name: Checkout code
       uses: actions/checkout@v3
     
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: '3.10'
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install gspread pandas requests google-auth oauth2client
+        pip install gspread pandas requests
     
-    - name: Create Python script
+    - name: Create simplified update script
       run: |
-        cat > update_indodax.py << 'EOF'
-        #!/usr/bin/env python3
-        """
-        INDOdAX Auto-Update Script for GitHub Actions
-        Update Google Sheets every 5 minutes
-        """
-        
-        import gspread
+        cat > update_simple.py << 'EOF'
+        import os
+        import json
         import pandas as pd
         import requests
-        import json
-        import os
         from datetime import datetime
-        from google.oauth2.service_account import Credentials
-        from oauth2client.service_account import ServiceAccountCredentials
-        import sys
         
-        def main():
-            print("🚀 Starting Indodax Auto-Update...")
-            
-            # 1. Ambil credentials dari GitHub Secrets
-            sheets_url = os.environ.get('SHEETS_URL', '')
-            
-            if not sheets_url:
-                print("❌ SHEETS_URL not set in secrets")
-                return False
-            
-            # 2. Setup Google Sheets credentials
-            # Simpan credentials JSON ke file sementara
-            creds_json = os.environ.get('GOOGLE_CREDENTIALS', '')
-            
-            if not creds_json:
-                print("❌ GOOGLE_CREDENTIALS not set in secrets")
-                return False
-            
-            try:
-                # Parse JSON credentials
-                creds_dict = json.loads(creds_json)
-                
-                # Buat credentials file
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                    json.dump(creds_dict, f)
-                    creds_file = f.name
-                
-                # Authenticate dengan Google Sheets
-                scope = [
-                    'https://spreadsheets.google.com/feeds',
-                    'https://www.googleapis.com/auth/drive'
-                ]
-                
-                creds = ServiceAccountCredentials.from_json_keyfile_name(creds_file, scope)
-                gc = gspread.authorize(creds)
-                
-                print("✅ Google Sheets authenticated")
-                
-            except Exception as e:
-                print(f"❌ Authentication failed: {e}")
-                return False
-            
-            # 3. Fetch data dari Indodax API
-            try:
-                url = "https://indodax.com/api/tickers"
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                response = requests.get(url, headers=headers, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    if 'tickers' in data:
-                        # Proses data
-                        records = []
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        
-                        for pair, values in data['tickers'].items():
-                            record = {
-                                'timestamp': timestamp,
-                                'pair': pair.upper(),
-                                'last': float(values.get('last', 0)),
-                                'buy': float(values.get('buy', 0)),
-                                'sell': float(values.get('sell', 0)),
-                                'high': float(values.get('high', 0)),
-                                'low': float(values.get('low', 0)),
-                                'volume_idr': float(values.get('vol_idr', 0))
-                            }
-                            records.append(record)
-                        
-                        df = pd.DataFrame(records)
-                        print(f"✅ Fetched {len(df)} pairs from Indodax")
-                        
-                        # 4. Update Google Sheets
-                        spreadsheet = gc.open_by_url(sheets_url)
-                        
-                        # Cek sheet REALTIME_ALL
-                        try:
-                            sheet = spreadsheet.worksheet("REALTIME_ALL")
-                        except:
-                            # Buat baru jika tidak ada
-                            sheet = spreadsheet.add_worksheet(title="REALTIME_ALL", rows=5000, cols=15)
-                        
-                        # Update data
-                        # Convert DataFrame ke list of lists
-                        data_to_update = [df.columns.tolist()] + df.values.tolist()
-                        
-                        # Clear dan update sheet
-                        sheet.clear()
-                        sheet.update('A1', data_to_update)
-                        
-                        # Update timestamp di SUMMARY jika ada
-                        try:
-                            summary_sheet = spreadsheet.worksheet("SUMMARY")
-                            summary_sheet.update('B2', [[timestamp]])
-                            summary_sheet.update('B12', [["🟢 ACTIVE - GitHub Actions"]])
-                        except:
-                            pass
-                        
-                        print(f"✅ Google Sheets updated at {timestamp}")
-                        return True
-                        
-                    else:
-                        print("❌ 'tickers' not found in API response")
-                        return False
-                else:
-                    print(f"❌ API Error: {response.status_code}")
-                    return False
-                    
-            except Exception as e:
-                print(f"❌ Update error: {e}")
-                return False
+        print("🔧 DEBUG: Starting script...")
         
-        if __name__ == "__main__":
-            success = main()
-            sys.exit(0 if success else 1)
+        # Debug: Print environment variables (without revealing secrets)
+        sheets_url = os.environ.get('SHEETS_URL', '')
+        print(f"🔧 DEBUG: SHEETS_URL exists: {'YES' if sheets_url else 'NO'}")
+        
+        # Coba akses Indodax API dulu
+        try:
+            print("🌐 Testing Indodax API...")
+            response = requests.get("https://indodax.com/api/tickers", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                pair_count = len(data.get('tickers', {}))
+                print(f"✅ Indodax API OK! Found {pair_count} pairs")
+                
+                # Simpan data ke file untuk debug
+                with open('indodax_sample.json', 'w') as f:
+                    json.dump(list(data['tickers'].keys())[:5], f)
+                
+                print("📊 First 5 pairs:", list(data['tickers'].keys())[:5])
+            else:
+                print(f"❌ Indodax API failed: {response.status_code}")
+        except Exception as e:
+            print(f"❌ Indodax API error: {e}")
+        
+        print("🏁 Script finished")
         EOF
     
-    - name: Run update script
-      env:
-        SHEETS_URL: ${{ secrets.SHEETS_URL }}
-        GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-      run: |
-        python update_indodax.py
+    - name: Run debug script
+      run: python update_simple.py
     
-    - name: Send notification on failure
-      if: failure()
-      run: |
-        echo "❌ Auto-update failed!"
-        echo "Check the logs for details."
+    - name: Upload debug files
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: debug-output
+        path: |
+          indodax_sample.json
